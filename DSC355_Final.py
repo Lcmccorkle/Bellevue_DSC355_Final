@@ -1,6 +1,3 @@
-# DSC355_Final.py
-# Walmart Weekly Sales Forecaster – Clean & Robust Version
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -15,7 +12,7 @@ warnings.filterwarnings('ignore')
 # CONFIGURATION
 # ────────────────────────────────────────────────
 
-MODEL_FILE = 'walmart_xgb_model.joblib'
+MODEL_PATH = 'walmart_xgb_model.joblib'
 
 PART_FILES = [
     'engineered_walmart_data_Part1.csv',
@@ -24,46 +21,15 @@ PART_FILES = [
     'engineered_walmart_data_Part4.csv'
 ]
 
-# Try these encodings in order
-ENCODING_ORDER = ['utf-8', 'cp1252', 'latin1', 'iso-8859-1', 'utf-8-sig']
+ENCODING_TRIES = ['utf-8', 'cp1252', 'latin1', 'iso-8859-1', 'utf-8-sig']
 
-# Default values for missing features
+# Define fallback defaults BEFORE using them
 FALLBACK_DEFAULTS = {
-    'Store': 1,
-    'Dept': 1,
-    'IsHoliday': False,
-    'Size': 140000,
-    'Temperature': 60.0,
-    'Fuel_Price': 3.3,
-    'MarkDown1': 0.0,
-    'MarkDown2': 0.0,
-    'MarkDown3': 0.0,
-    'MarkDown4': 0.0,
-    'MarkDown5': 0.0,
-    'CPI': 170.0,
-    'Unemployment': 7.0,
-    'Type_B': 0,
-    'Type_C': 0,
-    'Year': 2012,
-    'Month': 9,
-    'Week': 36,
-    'Quarter': 3,
-    'DayOfWeek': 4,
-    'Total_MarkDown': 0.0,
-    'Holiday_x_TotalMarkdown': 0.0,
-    'IsWeekend': 0,
-    'Economic_Index': 0.0,
-    'Markdown_Group': '0',          # safe value - change to 'Low'/'Medium' if needed
-    'Temp_Category_Hot': 0,
-    'Temp_Category_Mild': 1,
-    'Unemployment_Category_Low': 0,
-    'Unemployment_Category_Medium': 1,
-    'Size_Category_Medium': 1,
-    'Size_Category_Small': 0,
-    'FuelPrice_Category_Low': 0,
-    'FuelPrice_Category_Medium': 1,
-    'CPI_Category_Low': 0,
-    'CPI_Category_Medium': 1,
+    'size': 140000,
+    'temperature': 60.0,
+    'fuel_price': 3.3,
+    'unemployment': 7.0,
+    'cpi': 170.0,
 }
 
 
@@ -73,17 +39,17 @@ FALLBACK_DEFAULTS = {
 @st.cache_resource
 def load_resources():
     try:
-        model = joblib.load(MODEL_FILE)
+        model = joblib.load(MODEL_PATH)
     except Exception as e:
-        st.error(f"Cannot load model: {type(e).__name__} – {e}")
+        st.error(f"Model load failed: {e}")
         st.stop()
 
     df_ref = None
     parts = []
 
     for path in PART_FILES:
-        loaded = False
-        for enc in ENCODING_ORDER:
+        success = False
+        for enc in ENCODING_TRIES:
             try:
                 df_part = pd.read_csv(
                     path,
@@ -93,13 +59,13 @@ def load_resources():
                     low_memory=False
                 )
                 parts.append(df_part)
-                loaded = True
+                success = True
                 break
             except:
                 continue
 
-        if not loaded:
-            st.warning(f"Could not load {path}")
+        if not success:
+            st.warning(f"Skipped {path}")
 
     if parts:
         df_ref = pd.concat(parts, ignore_index=True)
@@ -111,23 +77,22 @@ model, df_ref = load_resources()
 
 
 # ────────────────────────────────────────────────
-# Choices for dropdowns
+# Dropdown choices
 # ────────────────────────────────────────────────
 if df_ref is not None and 'Store' in df_ref.columns:
     stores = sorted(df_ref['Store'].astype(int).unique())
-    depts  = sorted(df_ref['Dept'].astype(int).unique())
-    types  = ['A', 'B', 'C']
+    depts = sorted(df_ref['Dept'].astype(int).unique())
+    types = ['A', 'B', 'C']
 else:
     stores = list(range(1, 46))
-    depts  = list(range(1, 100))
-    types  = ['A', 'B', 'C']
+    depts = list(range(1, 100))
+    types = ['A', 'B', 'C']
 
 
 # ────────────────────────────────────────────────
-# MAIN UI
+# UI + FORM
 # ────────────────────────────────────────────────
 st.title("Walmart Weekly Sales Forecaster")
-st.caption("XGBoost model from Milestone 4")
 
 with st.form("prediction_form"):
 
@@ -164,19 +129,20 @@ with st.form("prediction_form"):
     md4 = st.number_input("MarkDown4 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
     md5 = st.number_input("MarkDown5 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
 
-    # ─────────────── REQUIRED ───────────────
+    # ────────────────────────────────
+    #   THIS IS REQUIRED
+    # ────────────────────────────────
     submitted = st.form_submit_button("Predict Weekly Sales", type="primary", use_container_width=True)
 
 
 # ────────────────────────────────────────────────
-# Prediction logic
+# Prediction
 # ────────────────────────────────────────────────
 if submitted:
-    with st.spinner("Running prediction..."):
+    with st.spinner("Predicting..."):
 
         total_md = md1 + md2 + md3 + md4 + md5
 
-        # Build input row
         row = {
             'Store': store,
             'Dept': dept,
@@ -202,62 +168,53 @@ if submitted:
             'Holiday_x_TotalMarkdown': int(is_holiday) * total_md,
             'IsWeekend': 1 if week_start.weekday() >= 5 else 0,
             'Economic_Index': 0.0,
-            'Markdown_Group': '0',  # <--- Safe value that exists in training
+            'Markdown_Group': '0',  # safe value – change to 'Low'/'Medium' if needed
         }
 
         X_input = pd.DataFrame([row])
 
-        # Force categorical dtype for known categoricals
+        # Fix categorical dtype
         if 'Markdown_Group' in X_input.columns:
             X_input['Markdown_Group'] = X_input['Markdown_Group'].astype('category')
 
-        # Add binned columns (simple rules)
-        X_input['Temp_Category_Hot']     = 1 if temperature > 80 else 0
-        X_input['Temp_Category_Mild']    = 1 if 50 <= temperature <= 80 else 0
-        X_input['Unemployment_Category_Low']    = 1 if unemployment < 6 else 0
+        # Add binned columns
+        X_input['Temp_Category_Hot'] = 1 if temperature > 80 else 0
+        X_input['Temp_Category_Mild'] = 1 if 50 <= temperature <= 80 else 0
+        X_input['Unemployment_Category_Low'] = 1 if unemployment < 6 else 0
         X_input['Unemployment_Category_Medium'] = 1 if 6 <= unemployment <= 8 else 0
-        X_input['Size_Category_Medium']  = 1 if 100000 <= size <= 180000 else 0
-        X_input['Size_Category_Small']   = 1 if size < 100000 else 0
-        X_input['FuelPrice_Category_Low']    = 1 if fuel_price < 3.0 else 0
+        X_input['Size_Category_Medium'] = 1 if 100000 <= size <= 180000 else 0
+        X_input['Size_Category_Small'] = 1 if size < 100000 else 0
+        X_input['FuelPrice_Category_Low'] = 1 if fuel_price < 3.0 else 0
         X_input['FuelPrice_Category_Medium'] = 1 if 3.0 <= fuel_price <= 4.0 else 0
-        X_input['CPI_Category_Low']      = 1 if cpi < 150 else 0
-        X_input['CPI_Category_Medium']   = 1 if 150 <= cpi <= 190 else 0
+        X_input['CPI_Category_Low'] = 1 if cpi < 150 else 0
+        X_input['CPI_Category_Medium'] = 1 if 150 <= cpi <= 190 else 0
 
-        # Align with model's expected columns
+        # Align columns
         try:
-            expected_cols = model.feature_names_in_
-            X_input = X_input.reindex(columns=expected_cols, fill_value=0)
-
-            # Re-apply category dtype after fill
+            expected = model.feature_names_in_
+            X_input = X_input.reindex(columns=expected, fill_value=0)
             if 'Markdown_Group' in X_input.columns:
                 X_input['Markdown_Group'] = X_input['Markdown_Group'].astype('category')
-
         except AttributeError:
-            st.info("Model does not expose feature names – using input as-is")
+            pass
 
-        # Make prediction
         try:
-            log_pred = model.predict(X_input)[0]
-            dollar_pred = np.expm1(log_pred)
+            log_y = model.predict(X_input)[0]
+            dollars = np.expm1(log_y)
 
             st.success("Prediction ready")
-            st.metric("Predicted Weekly Sales", f"${dollar_pred:,.0f}")
-            st.metric("Log-scale value (internal)", f"{log_pred:.4f}")
-            st.caption(f"Store {store} • Dept {dept} • Week of {week_start:%Y-%m-%d}")
+            st.metric("Predicted Weekly Sales", f"${dollars:,.0f}")
+            st.metric("Log prediction", f"{log_y:.4f}")
+            st.caption(f"Store {store} • Dept {dept} • {week_start:%Y-%m-%d}")
 
         except Exception as e:
             st.error(f"Prediction failed: {type(e).__name__} – {e}")
-            if "category not in the training set" in str(e):
-                st.info("Try changing 'Markdown_Group' to 'Low', 'Medium', 'High', '0', or another value from training data")
+            st.info("Common fix: change 'Markdown_Group' to 'Low', 'Medium', 'High', '0', etc.")
 
 
-# ────────────────────────────────────────────────
-# Footer
-# ────────────────────────────────────────────────
-with st.expander("Model information"):
+with st.expander("Model info"):
     st.markdown("""
-    - Model: XGBoost Regressor (Milestone 4)
+    - Model: XGBoost (Milestone 4)
     - Target: log₁ₚ(Weekly_Sales)
-    - Approx test performance: MAE $7k–$9k, R² 0.93–0.96
-    - Some engineered features use defaults when not provided
+    - Approx performance: MAE $7k–$9k, R² 0.93–0.96
     """)
