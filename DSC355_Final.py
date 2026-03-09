@@ -26,7 +26,7 @@ PART_FILES = [
 
 # Encoding that usually fixes 0x9d / invalid continuation byte errors
 CSV_READ_KWARGS = {
-    'parse_dates': ['Date', 'date'],
+    'parse_dates': ['Date'],
     'encoding': 'cp1252',              # ← Quick resolution: most common Windows encoding
     'encoding_errors': 'replace',      # replace invalid chars with �
     'low_memory': False
@@ -234,4 +234,5 @@ with st.expander("Model details"):
     - **Approx test performance**: MAE $7k–$9k, R² 0.93–0.96
     - **Data cutoff**: ~Oct 2012
     """)
+
 
