@@ -7,10 +7,7 @@ import warnings
 
 warnings.filterwarnings('ignore')
 
-
-# ────────────────────────────────────────────────
 # CONFIGURATION
-# ────────────────────────────────────────────────
 
 MODEL_PATH = 'walmart_xgb_model.joblib'
 
@@ -32,10 +29,8 @@ FALLBACK_DEFAULTS = {
     'cpi': 170.0,
 }
 
-
-# ────────────────────────────────────────────────
 # Load model & reference data
-# ────────────────────────────────────────────────
+
 @st.cache_resource
 def load_resources():
     try:
@@ -75,10 +70,8 @@ def load_resources():
 
 model, df_ref = load_resources()
 
-
-# ────────────────────────────────────────────────
 # Dropdown choices
-# ────────────────────────────────────────────────
+
 if df_ref is not None and 'Store' in df_ref.columns:
     stores = sorted(df_ref['Store'].astype(int).unique())
     depts = sorted(df_ref['Dept'].astype(int).unique())
@@ -88,10 +81,8 @@ else:
     depts = list(range(1, 100))
     types = ['A', 'B', 'C']
 
-
-# ────────────────────────────────────────────────
 # UI + FORM
-# ────────────────────────────────────────────────
+
 st.title("Walmart Weekly Sales Forecaster")
 
 with st.form("prediction_form"):
@@ -129,15 +120,12 @@ with st.form("prediction_form"):
     md4 = st.number_input("MarkDown4 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
     md5 = st.number_input("MarkDown5 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
 
-    # ────────────────────────────────
-    #   THIS IS REQUIRED
-    # ────────────────────────────────
+      #   submit button
+
     submitted = st.form_submit_button("Predict Weekly Sales", type="primary", use_container_width=True)
 
-
-# ────────────────────────────────────────────────
 # Prediction
-# ────────────────────────────────────────────────
+
 if submitted:
     with st.spinner("Predicting..."):
 
@@ -168,7 +156,7 @@ if submitted:
             'Holiday_x_TotalMarkdown': int(is_holiday) * total_md,
             'IsWeekend': 1 if week_start.weekday() >= 5 else 0,
             'Economic_Index': 0.0,
-            'Markdown_Group': '0',  # safe value – change to 'Low'/'Medium' if needed
+            'Markdown_Group': '0',  # safe value
         }
 
         X_input = pd.DataFrame([row])
@@ -218,3 +206,4 @@ with st.expander("Model info"):
     - Target: log₁ₚ(Weekly_Sales)
     - Approx performance: MAE $7k–$9k, R² 0.93–0.96
     """)
+
