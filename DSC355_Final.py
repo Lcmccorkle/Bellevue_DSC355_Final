@@ -135,32 +135,43 @@ with st.form("sales_prediction_form"):
 if submit:
     # Build input dictionary with features the model expects
     input_dict = {
-        'Store': store,
-        'Dept': dept,
-        'IsHoliday': is_holiday,
-        'Size': size,
-        'Temperature': temperature,
-        'Fuel_Price': fuel_price,
-        'MarkDown1': md1,
-        'MarkDown2': md2,
-        'MarkDown3': md3,
-        'MarkDown4': md4,
-        'MarkDown5': md5,
-        'CPI': cpi,
-        'Unemployment': unemployment,
-        'Type_B': 1 if store_type == 'B' else 0,
-        'Type_C': 1 if store_type == 'C' else 0,
-        'Year': pred_date.year,
-        'Month': pred_date.month,
-        'Week': pred_date.isocalendar()[1],
-        'Quarter': (pred_date.month - 1) // 3 + 1,
-        'DayOfWeek': pred_date.weekday(),
-        # Add more engineered features here if your model was trained with them
-        # 'Total_MarkDown': md1 + md2 + md3 + md4 + md5,
-        # 'Holiday_x_TotalMarkdown': is_holiday * (md1 + md2 + md3 + md4 + md5),
-    }
+    'Store': store,
+    'Dept': dept,
+    'IsHoliday': is_holiday,
+    'Size': size,
+    'Temperature': temperature,
+    'Fuel_Price': fuel_price,
+    'MarkDown1': md1,
+    'MarkDown2': md2,
+    'MarkDown3': md3,
+    'MarkDown4': md4,
+    'MarkDown5': md5,
+    'CPI': cpi,
+    'Unemployment': unemployment,
+    
+    # Derived / engineered features (must match training)
+    'Total_MarkDown': md1 + md2 + md3 + md4 + md5,
+    'Holiday_x_TotalMarkdown': int(is_holiday) * (md1 + md2 + md3 + md4 + md5),
+    
+    # Dummies (example – add all that were in training)
+    'Type_B': 1 if store_type == 'B' else 0,
+    'Type_C': 1 if store_type == 'C' else 0,
+    
+    # Time features from date
+    'Year': pred_date.year,
+    'Month': pred_date.month,
+    'Week': pred_date.isocalendar()[1],
+    'Quarter': (pred_date.month - 1) // 3 + 1,
+    'DayOfWeek': pred_date.weekday(),
+    
+    # Add binning / categories if they were used
+    # Example:
+    # 'Temp_Category_Hot': 1 if temperature > 80 else 0,
+    # 'Temp_Category_Mild': 1 if 50 <= temperature <= 80 else 0,
+    # ... etc for Unemployment_Category, Size_Category, etc.
+}
 
-    input_df = pd.DataFrame([input_dict])
+input_df = pd.DataFrame([input_dict])
 
     # Try to match the exact column order the model was trained on
     try:
@@ -190,4 +201,5 @@ with st.expander("Model Summary (Milestone 4)"):
     - **Approximate test performance**: MAE $7k–$9k, R² 0.93–0.96
     - **Limitations**: Trained on data up to ~Oct 2012
     """)
+
 
