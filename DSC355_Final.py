@@ -1,5 +1,5 @@
 # DSC355_Final.py
-# Walmart Weekly Sales Forecaster
+# Walmart Weekly Sales Forecaster – with quick encoding fix
 
 import streamlit as st
 import pandas as pd
@@ -12,10 +12,11 @@ warnings.filterwarnings('ignore')
 
 
 # ────────────────────────────────────────────────
-#  Configuration & Constants
+#  Configuration
 # ────────────────────────────────────────────────
 
 MODEL_PATH = 'walmart_xgb_model.joblib'
+
 PART_FILES = [
     'engineered_walmart_data_Part1.csv',
     'engineered_walmart_data_Part2.csv',
@@ -23,20 +24,12 @@ PART_FILES = [
     'engineered_walmart_data_Part4.csv'
 ]
 
-DEFAULTS = {
-    'size': 140000,
-    'temperature': 60.0,
-    'fuel_price': 3.3,
-    'unemployment': 7.0,
-    'cpi': 170.0,
-}
-
+# Encoding that usually fixes 0x9d / invalid continuation byte errors
 CSV_READ_KWARGS = {
     'parse_dates': ['Date'],
-    'encoding': 'utf-8',
-    'encoding_errors': 'replace',       # most forgiving option
-    # 'encoding': 'cp1252',             # uncomment if utf-8 fails
-    # 'encoding': 'latin1',
+    'encoding': 'cp1252',              # ← Quick resolution: most common Windows encoding
+    'encoding_errors': 'replace',      # replace invalid chars with �
+    'low_memory': False
 }
 
 
@@ -48,26 +41,48 @@ def load_resources():
     # Load model
     try:
         model = joblib.load(MODEL_PATH)
+        st.caption("Model loaded successfully")
     except FileNotFoundError:
         st.error(f"Model file not found: {MODEL_PATH}")
-        st.error("Please place the trained model file in the same directory as this script.")
         st.stop()
     except Exception as e:
-        st.error(f"Failed to load model: {type(e).__name__}: {e}")
+        st.error(f"Model loading failed: {e}")
         st.stop()
 
-    # Load reference data (multiple parts)
+    # Load data parts with fixed encoding
     df_ref = None
-    try:
-        parts = []
-        for path in PART_FILES:
+    loaded_parts = []
+
+    for path in PART_FILES:
+        try:
             df_part = pd.read_csv(path, **CSV_READ_KWARGS)
-            parts.append(df_part)
-        df_ref = pd.concat(parts, ignore_index=True)
-        st.session_state.data_loaded = True
-    except Exception as e:
-        st.warning(f"Could not load all data parts: {e}")
-        st.info("Using fallback values for dropdowns and ranges.")
+            loaded_parts.append(df_part)
+            st.caption(f"Loaded: {path}")
+        except UnicodeDecodeError:
+            # Fallback for stubborn files
+            st.warning(f"cp1252 failed on {path} → trying latin1")
+            try:
+                df_part = pd.read_csv(
+                    path,
+                    parse_dates=['Date'],
+                    encoding='latin1',
+                    encoding_errors='replace'
+                )
+                loaded_parts.append(df_part)
+                st.caption(f"Loaded {path} using latin1 fallback")
+            except Exception as e2:
+                st.error(f"Could not load {path} even with fallback: {e2}")
+        except Exception as e:
+            st.error(f"Failed to read {path}: {e}")
+
+    if loaded_parts:
+        try:
+            df_ref = pd.concat(loaded_parts, ignore_index=True)
+            st.success(f"Loaded {len(loaded_parts)} / {len(PART_FILES)} data parts")
+        except Exception as e:
+            st.error(f"Concatenation failed: {e}")
+    else:
+        st.warning("No data parts loaded → dropdowns will use fallback ranges")
 
     return model, df_ref
 
@@ -76,29 +91,34 @@ model, df_ref = load_resources()
 
 
 # ────────────────────────────────────────────────
-#  Prepare choices & defaults
+#  Choices & defaults
 # ────────────────────────────────────────────────
 if df_ref is not None and 'Store' in df_ref.columns:
     stores = sorted(df_ref['Store'].unique().astype(int))
     depts  = sorted(df_ref['Dept'].unique().astype(int))
-    types  = sorted(df_ref.get('Type', pd.Series(['A', 'B', 'C'])).unique())
+    types  = ['A', 'B', 'C']  # fallback if Type missing
 else:
     stores = list(range(1, 46))
     depts  = list(range(1, 100))
     types  = ['A', 'B', 'C']
 
+DEFAULTS = {
+    'size': 140000,
+    'temperature': 60.0,
+    'fuel_price': 3.3,
+    'unemployment': 7.0,
+    'cpi': 170.0
+}
+
 
 # ────────────────────────────────────────────────
-#  UI
+#  Main UI
 # ────────────────────────────────────────────────
 st.title("Walmart Weekly Sales Forecaster")
-st.caption("Predict department-level weekly sales (Milestone 4 XGBoost model)")
+st.markdown("Predict weekly department sales using the Milestone 4 XGBoost model.")
 
-st.info("Most influential features (from SHAP): Store, Dept, Size, IsHoliday, Temperature, Total Markdown, Type, CPI, Unemployment")
+with st.form("prediction_form"):
 
-with st.form("sales_form", clear_on_submit=False):
-
-    # ── Store & Dept ───────────────────────────────
     st.subheader("Store & Department")
     c1, c2 = st.columns(2)
     with c1:
@@ -106,15 +126,13 @@ with st.form("sales_form", clear_on_submit=False):
     with c2:
         dept = st.selectbox("Department", depts, index=0)
 
-    # ── Date & Holiday ─────────────────────────────
     st.subheader("Date & Holiday")
     c3, c4 = st.columns(2)
     with c3:
         week_start = st.date_input("Week start date", datetime(2012, 9, 1))
     with c4:
-        is_holiday = st.checkbox("Holiday week", False)
+        is_holiday = st.checkbox("Holiday week?", False)
 
-    # ── Store & Economic ───────────────────────────
     st.subheader("Store & Economic Features")
     c5, c6, c7 = st.columns(3)
     with c5:
@@ -127,24 +145,23 @@ with st.form("sales_form", clear_on_submit=False):
         unemployment = st.number_input("Unemployment Rate (%)", 3.0, 12.0, DEFAULTS['unemployment'], step=0.1)
         cpi = st.number_input("CPI", 120.0, 230.0, DEFAULTS['cpi'], step=0.1)
 
-    # ── Markdowns ──────────────────────────────────
-    st.subheader("Promotions (MarkDowns)")
+    st.subheader("MarkDowns")
     md1 = st.number_input("MarkDown1 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
     md2 = st.number_input("MarkDown2 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
     md3 = st.number_input("MarkDown3 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
     md4 = st.number_input("MarkDown4 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
     md5 = st.number_input("MarkDown5 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
 
-    predict_btn = st.form_submit_button("Get Prediction", type="primary", use_container_width=True)
+    submitted = st.form_submit_button("Predict Weekly Sales", type="primary")
 
 
 # ────────────────────────────────────────────────
 #  Prediction
 # ────────────────────────────────────────────────
-if predict_btn:
-    with st.spinner("Preparing features and predicting..."):
+if submitted:
+    with st.spinner("Preparing input and predicting..."):
 
-        total_markdown = md1 + md2 + md3 + md4 + md5
+        total_md = md1 + md2 + md3 + md4 + md5
 
         row = {
             'Store': store,
@@ -167,55 +184,53 @@ if predict_btn:
             'Week': week_start.isocalendar()[1],
             'Quarter': (week_start.month - 1) // 3 + 1,
             'DayOfWeek': week_start.weekday(),
-            'Total_MarkDown': total_markdown,
-            'Holiday_x_TotalMarkdown': int(is_holiday) * total_markdown,
-            # Add more engineered features here when you know what is missing
+            'Total_MarkDown': total_md,
+            'Holiday_x_TotalMarkdown': int(is_holiday) * total_md,
+            # Add more derived / binned features if needed
         }
 
         X_input = pd.DataFrame([row])
 
-        # Try to align columns
+        # Safe column alignment
         try:
             expected = model.feature_names_in_
             available = [c for c in expected if c in X_input.columns]
             missing = [c for c in expected if c not in X_input.columns]
 
             if missing:
-                st.warning(f"Missing {len(missing)} expected columns (using {len(available)}). "
-                           f"Examples of missing: {missing[:4]}")
+                st.warning(f"Using {len(available)}/{len(expected)} columns. "
+                           f"Missing: {missing[:5]}{'...' if len(missing)>5 else ''}")
 
             if not available:
-                st.error("No matching columns found. Cannot make prediction.")
+                st.error("No matching columns found → cannot predict.")
                 st.stop()
 
             X_input = X_input[available]
 
         except AttributeError:
-            st.info("Model has no feature_names_in_ attribute – using current columns only.")
+            st.info("Model has no feature_names_in_ → using current columns as-is.")
 
         # Predict
         try:
             log_y = model.predict(X_input)[0]
-            y_dollars = np.expm1(log_y)   # assuming log1p was used
+            y_dollars = np.expm1(log_y)
 
-            st.success("Prediction ready")
+            st.success("Prediction ready!")
             st.metric("Predicted Weekly Sales", f"${y_dollars:,.0f}")
             st.metric("Log prediction (internal)", f"{log_y:.4f}")
-            st.caption(f"Store {store} • Dept {dept} • Week starting {week_start:%Y-%m-%d}")
+            st.caption(f"Store {store} • Dept {dept} • Week of {week_start:%Y-%m-%d}")
 
         except Exception as e:
-            st.error(f"Prediction failed: {type(e).__name__}: {e}")
-            st.info("Most common causes: missing columns or incorrect data types.")
+            st.error(f"Prediction failed: {type(e).__name__} – {e}")
 
 
 # ────────────────────────────────────────────────
-#  Footer / Info
+#  Footer
 # ────────────────────────────────────────────────
-with st.expander("Model information"):
+with st.expander("Model details"):
     st.markdown("""
-    - **Model**: XGBoost regressor (tuned with RandomizedSearchCV + early stopping)
+    - **Model**: XGBoost (Milestone 4)
     - **Target**: log₁ₚ(Weekly_Sales)
-    - **Approximate performance** (test set): MAE $7,000–$9,000, R² 0.93–0.96
-    - **Training period**: up to ~October 2012
-    - **Limitations**: extreme holiday values and post-2012 changes not captured
+    - **Approx test performance**: MAE $7k–$9k, R² 0.93–0.96
+    - **Data cutoff**: ~Oct 2012
     """)
