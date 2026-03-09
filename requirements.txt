@@ -1,6 +1,7 @@
-streamlit>=1.30.0
-pandas>=2.0.0
-numpy>=1.24.0
-joblib>=1.2.0
-xgboost>=2.0.0
-matplotlib>=3.8.0          # ← only add this if your app really needs it
+streamlit
+pandas
+numpy
+joblib
+xgboost
+matplotlib
+
