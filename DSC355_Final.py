@@ -1,6 +1,7 @@
 # =============================================================================
-# PART 1: IMPORTS & SETUP
+# Walmart Weekly Sales Forecaster – Streamlit App
 # =============================================================================
+
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -12,25 +13,17 @@ warnings.filterwarnings('ignore')
 
 
 # =============================================================================
-# PART 2: DATA & MODEL LOADING (Cached)
+# PART 1: LOAD MODEL & REFERENCE DATA
 # =============================================================================
 @st.cache_resource
-def load_model_and_reference_data():
-    """
-    Loads the trained XGBoost model and (if available) the reference dataset
-    used for realistic dropdown options and default values.
-    """
-    # ── Load the model ───────────────────────────────────────────────────────
-    model = None
+def load_model_and_data():
     try:
         model = joblib.load('walmart_xgb_model.joblib')
     except FileNotFoundError:
         st.error("Model file 'walmart_xgb_model.joblib' not found.")
-        st.error("→ Make sure the file is in the same folder as this script and correctly named.")
-        st.stop()   # ← this stops execution → the rest of the function won't run
+        st.error("Make sure the file is in the same folder as this script.")
+        st.stop()
 
-    # If we reach here → model was successfully loaded
-    # ── Load reference data (try to combine the 4 part files) ────────────────
     df_ref = None
     part_files = [
         'engineered_walmart_data_Part1.csv',
@@ -40,166 +33,160 @@ def load_model_and_reference_data():
     ]
 
     try:
-        df_parts = [pd.read_csv(f, parse_dates=['Date']) for f in part_files]
-        df_ref = pd.concat(df_parts, ignore_index=True)
-        # Optional: show success message (can be removed in production)
-        # st.success("Loaded all data parts successfully", icon="✅")
-    except FileNotFoundError as e:
-        st.warning(f"Could not load one or more data parts: {e}")
-        st.info("Using fallback/default values for dropdowns and inputs.")
+        parts = []
+        for path in part_files:
+            parts.append(pd.read_csv(path, parse_dates=['Date'], encoding='cp1252'))
+        df_ref = pd.concat(parts, ignore_index=True)
     except Exception as e:
-        st.error(f"Unexpected error while loading data: {e}")
+        st.warning(f"Could not load data parts: {e}")
+        st.info("Using fallback defaults for dropdowns and ranges.")
 
     return model, df_ref
 
 
-# Load once and reuse
-model, df_ref = load_model_and_reference_data()
+model, df_ref = load_model_and_data()
 
 
 # =============================================================================
-# PART 3: PREPARE DROPDOWN CHOICES & DEFAULT VALUES
+# PART 2: DROPDOWNS & DEFAULTS
 # =============================================================================
 if df_ref is not None:
-    stores = sorted(df_ref['Store'].unique().astype(int).tolist())
-    depts  = sorted(df_ref['Dept'].unique().astype(int).tolist())
-    types  = ['A', 'B', 'C']  # adjust if you have actual 'Type' column
+    stores = sorted(df_ref['Store'].unique().astype(int))
+    depts  = sorted(df_ref['Dept'].unique().astype(int))
+    types  = ['A', 'B', 'C']
 else:
-    # Fallback values when data is missing
     stores = list(range(1, 46))
     depts  = list(range(1, 100))
     types  = ['A', 'B', 'C']
 
-# Reasonable default values
 DEFAULTS = {
     'size': 140000,
-    'temperature': 60.0,
-    'fuel_price': 3.3,
-    'unemployment': 7.0,
-    'cpi': 170.0,
+    'temp': 60.0,
+    'fuel': 3.3,
+    'unemp': 7.0,
+    'cpi': 170.0
 }
 
 
 # =============================================================================
-# PART 4: STREAMLIT USER INTERFACE & PREDICTION LOGIC
+# PART 3: USER INTERFACE
 # =============================================================================
 st.title("Walmart Weekly Sales Forecaster")
-st.markdown("Predict weekly department-level sales using the XGBoost model from Milestone 4.")
+st.markdown("Predict department-level weekly sales using the XGBoost model from Milestone 4.")
 
-st.info("Most important features (based on SHAP): Store, Dept, Size, IsHoliday, Temperature, Markdowns, Type, CPI, Unemployment")
+with st.form("prediction_form"):
 
-# ── Input Form ───────────────────────────────────────────────────────────────
-with st.form("sales_prediction_form"):
-
-    # Store & Department
     st.subheader("Store & Department")
     col1, col2 = st.columns(2)
     with col1:
-        store = st.selectbox("Store", options=stores, index=0)
+        store = st.selectbox("Store", stores, index=0)
     with col2:
-        dept = st.selectbox("Department", options=depts, index=0)
+        dept = st.selectbox("Department", depts, index=0)
 
-    # Date & Holiday
     st.subheader("Date & Holiday")
     col3, col4 = st.columns(2)
     with col3:
-        pred_date = st.date_input("Week start date", value=datetime(2012, 9, 1))
+        pred_date = st.date_input("Week start", datetime(2012, 9, 1))
     with col4:
-        is_holiday = st.checkbox("Holiday week?", value=False)
+        is_holiday = st.checkbox("Holiday week?", False)
 
-    # Store & Economic features
     st.subheader("Store & Economic Features")
     col5, col6, col7 = st.columns(3)
     with col5:
         size = st.number_input("Store Size (sq ft)", 30000, 220000, DEFAULTS['size'], step=5000)
-        store_type = st.selectbox("Store Type", options=types, index=0)
+        store_type = st.selectbox("Store Type", types, index=0)
     with col6:
-        temperature = st.number_input("Temperature (°F)", -20.0, 110.0, DEFAULTS['temperature'], step=1.0)
-        fuel_price  = st.number_input("Fuel Price ($/gal)", 1.5, 5.0, DEFAULTS['fuel_price'], step=0.1)
+        temperature = st.number_input("Temperature (°F)", -20.0, 110.0, DEFAULTS['temp'], step=1.0)
+        fuel_price  = st.number_input("Fuel Price ($/gal)", 1.5, 5.0, DEFAULTS['fuel'], step=0.1)
     with col7:
-        unemployment = st.number_input("Unemployment Rate (%)", 3.0, 12.0, DEFAULTS['unemployment'], step=0.1)
+        unemployment = st.number_input("Unemployment (%)", 3.0, 12.0, DEFAULTS['unemp'], step=0.1)
         cpi = st.number_input("CPI", 120.0, 230.0, DEFAULTS['cpi'], step=0.1)
 
-    # Promotions
-    st.subheader("Promotions (MarkDowns)")
-    md1 = st.number_input("MarkDown1 ($)", min_value=0.0, value=0.0, step=100.0, format="%.0f")
-    md2 = st.number_input("MarkDown2 ($)", min_value=0.0, value=0.0, step=100.0, format="%.0f")
-    md3 = st.number_input("MarkDown3 ($)", min_value=0.0, value=0.0, step=100.0, format="%.0f")
-    md4 = st.number_input("MarkDown4 ($)", min_value=0.0, value=0.0, step=100.0, format="%.0f")
-    md5 = st.number_input("MarkDown5 ($)", min_value=0.0, value=0.0, step=100.0, format="%.0f")
+    st.subheader("MarkDowns")
+    md1 = st.number_input("MarkDown1 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
+    md2 = st.number_input("MarkDown2 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
+    md3 = st.number_input("MarkDown3 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
+    md4 = st.number_input("MarkDown4 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
+    md5 = st.number_input("MarkDown5 ($)", 0.0, value=0.0, step=100.0, format="%.0f")
 
-    submit = st.form_submit_button("Predict Weekly Sales")
+    submitted = st.form_submit_button("Predict Weekly Sales")
 
 
-# ── Prediction ───────────────────────────────────────────────────────────────
-if submit:
-    # Build input dictionary with features the model expects
-    input_dict = {
-    'Store': store,
-    'Dept': dept,
-    'IsHoliday': is_holiday,
-    'Size': size,
-    'Temperature': temperature,
-    'Fuel_Price': fuel_price,
-    'MarkDown1': md1,
-    'MarkDown2': md2,
-    'MarkDown3': md3,
-    'MarkDown4': md4,
-    'MarkDown5': md5,
-    'CPI': cpi,
-    'Unemployment': unemployment,
-    
-    # Derived / engineered features (must match training)
-    'Total_MarkDown': md1 + md2 + md3 + md4 + md5,
-    'Holiday_x_TotalMarkdown': int(is_holiday) * (md1 + md2 + md3 + md4 + md5),
-    
-    # Dummies (example – add all that were in training)
-    'Type_B': 1 if store_type == 'B' else 0,
-    'Type_C': 1 if store_type == 'C' else 0,
-    
-    # Time features from date
-    'Year': pred_date.year,
-    'Month': pred_date.month,
-    'Week': pred_date.isocalendar()[1],
-    'Quarter': (pred_date.month - 1) // 3 + 1,
-    'DayOfWeek': pred_date.weekday(),
-    
-    # Add binning / categories if they were used
-    # Example:
-    # 'Temp_Category_Hot': 1 if temperature > 80 else 0,
-    # 'Temp_Category_Mild': 1 if 50 <= temperature <= 80 else 0,
-    # ... etc for Unemployment_Category, Size_Category, etc.
-}
+# =============================================================================
+# PART 4: PREDICTION LOGIC
+# =============================================================================
+if submitted:
+    with st.spinner("Preparing input features..."):
+        total_md = md1 + md2 + md3 + md4 + md5
 
-input_df = pd.DataFrame([input_dict])
+        input_dict = {
+            'Store': store,
+            'Dept': dept,
+            'IsHoliday': is_holiday,
+            'Size': size,
+            'Temperature': temperature,
+            'Fuel_Price': fuel_price,
+            'MarkDown1': md1,
+            'MarkDown2': md2,
+            'MarkDown3': md3,
+            'MarkDown4': md4,
+            'MarkDown5': md5,
+            'CPI': cpi,
+            'Unemployment': unemployment,
+            'Type_B': 1 if store_type == 'B' else 0,
+            'Type_C': 1 if store_type == 'C' else 0,
+            'Year': pred_date.year,
+            'Month': pred_date.month,
+            'Week': pred_date.isocalendar()[1],
+            'Quarter': (pred_date.month - 1) // 3 + 1,
+            'DayOfWeek': pred_date.weekday(),
+            'Total_MarkDown': total_md,
+            'Holiday_x_TotalMarkdown': int(is_holiday) * total_md,
+            # Add more derived features / bins if needed
+        }
 
-    # Try to match the exact column order the model was trained on
+        input_df = pd.DataFrame([input_dict])
+
+    # Try to align columns with model expectations
     try:
-        expected_cols = model.feature_names_in_
-        input_df = input_df[expected_cols]
+        expected = model.feature_names_in_
+
+        # Only use columns the model knows
+        available = [c for c in expected if c in input_df.columns]
+        missing = [c for c in expected if c not in input_df.columns]
+
+        if missing:
+            st.warning(f"Missing {len(missing)} expected columns. "
+                       f"Using {len(available)} available columns. "
+                       f"Missing example: {missing[:3]}")
+
+        input_df = input_df[available]
+
     except AttributeError:
-        st.warning("Could not read model.feature_names_in_ — hoping column order matches.")
+        st.info("Model has no feature_names_in_ attribute – using current columns only.")
 
     # Make prediction
-    log_pred = model.predict(input_df)[0]
-    dollar_pred = np.expm1(log_pred)  # if you used np.log1p → use expm1
-    # If you used np.log(Weekly_Sales) instead → change to np.exp(log_pred)
+    try:
+        log_pred = model.predict(input_df)[0]
+        dollar_pred = np.expm1(log_pred)   # if target was log1p
 
-    # Show result
-    st.success("Prediction ready!")
-    st.metric("Predicted Weekly Sales", f"${dollar_pred:,.0f}")
-    st.metric("(Log-scale internal value)", f"{log_pred:.4f}")
+        st.success("Prediction successful!")
+        st.metric("Predicted Weekly Sales", f"${dollar_pred:,.0f}")
+        st.metric("Log prediction (internal)", f"{log_pred:.4f}")
+        st.caption(f"Store {store} • Dept {dept} • Week of {pred_date:%Y-%m-%d}")
 
-    st.caption(f"Store {store} • Dept {dept} • Week of {pred_date:%Y-%m-%d}")
+    except Exception as e:
+        st.error(f"Prediction failed: {e}")
+        st.info("Check that all required features are provided and have correct types.")
 
 
-# ── Model information ────────────────────────────────────────────────────────
-with st.expander("Model Summary (Milestone 4)"):
+# =============================================================================
+# MODEL INFO
+# =============================================================================
+with st.expander("About this model"):
     st.markdown("""
-    - **Model**: XGBoost Regressor (tuned with RandomizedSearchCV + early stopping)
-    - **Target**: log(Weekly_Sales + 1) → transformed back to dollars
-    - **Approximate test performance**: MAE $7k–$9k, R² 0.93–0.96
-    - **Limitations**: Trained on data up to ~Oct 2012
+    - **Model**: XGBoost Regressor (Milestone 4)
+    - **Target**: log(Weekly_Sales + 1)
+    - **Approx performance**: MAE $7k–$9k, R² ~0.93–0.96
+    - **Data**: Up to ~Oct 2012
     """)
-
-
